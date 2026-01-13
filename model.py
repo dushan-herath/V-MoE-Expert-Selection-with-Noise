@@ -85,20 +85,29 @@ class MoE(nn.Module):
 # Single Attention Block
 # ----------------------------------------------------
 class SelfAttentionBlock(nn.Module):
-    def __init__(self, emb_size, num_heads, dropout):
+    def __init__(self, emb_size, num_heads, dropout, attn_depth=3):
         super().__init__()
-        self.norm = nn.LayerNorm(emb_size)
-        self.attn = nn.MultiheadAttention(
-            emb_size, num_heads, batch_first=True
-        )
+
+        self.attn_layers = nn.ModuleList([
+            nn.MultiheadAttention(emb_size, num_heads, batch_first=True)
+            for _ in range(attn_depth)
+        ])
+
+        self.norms = nn.ModuleList([
+            nn.LayerNorm(emb_size) for _ in range(attn_depth)
+        ])
+
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        x_res = x
-        x = self.norm(x)
-        x, _ = self.attn(x, x, x)
-        x = self.dropout(x)
-        return x + x_res
+        for norm, attn in zip(self.norms, self.attn_layers):
+            x_res = x
+            x = norm(x)
+            x, _ = attn(x, x, x)
+            x = self.dropout(x)
+            x = x + x_res
+        return x
+
 
 
 # ----------------------------------------------------
@@ -133,7 +142,7 @@ class ViTMoE(nn.Module):
         self.attn_block = SelfAttentionBlock(
             emb_size=emb_size,
             num_heads=num_heads,
-            dropout=dropout
+            dropout=dropout,
         )
 
         # 🔹 Shared Pre-MLP
