@@ -40,6 +40,7 @@ class CIFAR10Small:
         ])
 
         test_transform = T.Compose([
+            T.Resize(64),
             T.ToTensor(),
             T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
