@@ -20,7 +20,7 @@ if __name__ == "__main__":  # necessary for Windows
         "patch_size": 4,
         "emb_size": 128,
         "depth": 6,
-        "num_heads": 8,
+        "num_heads": 16,
         "mlp_ratio": 4.0,
         "dropout": 0.3,
         "num_classes": 10,
@@ -70,26 +70,8 @@ if __name__ == "__main__":  # necessary for Windows
         print(f"  {k}: {v:,}")
 
     criterion = nn.CrossEntropyLoss()
-    #optimizer = optim.AdamW(model.parameters(), lr=config["lr"], weight_decay=1e-4)
-    #scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
-
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=3e-4,            # keep LR
-        betas=(0.9, 0.999),
-        weight_decay=1e-2,  # stronger regularization
-        eps=1e-8
-    )
-
-    scheduler = optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        max_lr=config["lr"],
-        epochs=config["epochs"],
-        steps_per_epoch=len(trainloader),
-        pct_start=0.1,
-        div_factor=10,
-        final_div_factor=100
-    )
+    optimizer = optim.AdamW(model.parameters(), lr=config["lr"], weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
 
     # -----------------------------
     # Training Loop
@@ -115,9 +97,7 @@ if __name__ == "__main__":  # necessary for Windows
             outputs = model(images)
             loss = criterion(outputs, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            scheduler.step()
 
             running_loss += loss.item() * images.size(0)
 
@@ -155,7 +135,7 @@ if __name__ == "__main__":  # necessary for Windows
         val_acc = correct / total
         val_accuracies.append(val_acc)
 
-        #scheduler.step()
+        scheduler.step()
         epoch_time = time.time() - start_time
 
         print(f"Epoch [{epoch}/{config['epochs']}] "

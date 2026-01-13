@@ -87,19 +87,32 @@ class MoE(nn.Module):
 class SelfAttentionBlock(nn.Module):
     def __init__(self, emb_size, num_heads, dropout):
         super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = emb_size // num_heads
+
         self.norm = nn.LayerNorm(emb_size)
-        self.attn = nn.MultiheadAttention(
-            emb_size, num_heads, batch_first=True
-        )
+
+        self.qkv = nn.Linear(emb_size, emb_size * 3)
+        self.proj = nn.Linear(emb_size, emb_size)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        x_res = x
+        B, N, C = x.shape
+
         x = self.norm(x)
-        x, _ = self.attn(x, x, x)
+
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+        q, k, v = qkv.permute(2, 0, 3, 1, 4)
+
+        # Uses FlashAttention if available
+        x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+
+        x = x.transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
         x = self.dropout(x)
-        x = self.norm(x)
-        return x 
+
+        return x
+
 
 
 # ----------------------------------------------------
