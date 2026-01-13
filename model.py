@@ -172,24 +172,27 @@ class ViTMoE(nn.Module):
     def forward(self, x):
         B = x.size(0)
 
+        # Patch tokens only
         x = self.patch_embed(x)                  # [B, N, E]
-        cls = self.cls_token.expand(B, -1, -1)   # [B, 1, E]
-        x = torch.cat([cls, x], dim=1)           # [B, N+1, E]
-        x = x + self.pos_embed
+        x = x + self.pos_embed[:, :x.size(1)]    # match number of tokens
         x = self.dropout(x)
 
-        # 1️⃣ Attention
+        # 1️⃣ Deep Attention
         x = self.attn_block(x)
 
-        # 2️⃣ Shared MLP
-        x = x + self.pre_mlp(x)
+        # 2️⃣ Shared MLP (still optional)
+        # x = x + self.pre_mlp(x)
 
-        # 3️⃣ Top-k MoE
+        # 3️⃣ Top-k MoE (should normally be residual, but keeping your test)
         x = self.moe(x)
 
         x = self.norm(x)
-        cls_out = x[:, 0]
-        return self.head(cls_out)
+
+        # Global average pooling instead of CLS
+        x = x.mean(dim=1)                        # [B, E]
+
+        return self.head(x)
+
 
 
 # ----------------------------------------------------
