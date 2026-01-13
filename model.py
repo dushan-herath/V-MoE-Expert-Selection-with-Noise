@@ -125,7 +125,7 @@ class ViTMoE(nn.Module):
         # Exactly ONE MoE block
         self.moe = MoE(
             emb_size=emb_size,
-            num_experts=10,
+            num_experts=4,
             hidden_size=int(emb_size * mlp_ratio),
             dropout=dropout
         )
