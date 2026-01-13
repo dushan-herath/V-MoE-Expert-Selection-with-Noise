@@ -17,10 +17,10 @@ if __name__ == "__main__":  # necessary for Windows
 
     config = {
         "img_size": 32,
-        "patch_size": 4,
+        "patch_size": 8,
         "emb_size": 128,
         "depth": 6,
-        "num_heads": 4,
+        "num_heads": 16,
         "mlp_ratio": 4.0,
         "dropout": 0.1,
         "moe_layers": [2, 4],
