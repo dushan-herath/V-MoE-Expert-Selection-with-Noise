@@ -18,10 +18,10 @@ if __name__ == "__main__":  # necessary for Windows
     config = {
         "img_size": 32,
         "patch_size": 8,
-        "emb_size": 96,
+        "emb_size": 192,
         "depth": 6,
         "num_heads": 8,
-        "mlp_ratio": 1.5,
+        "mlp_ratio": 4,
         "dropout": 0.3,
         "moe_layers": [2, 4],
         "num_classes": 10,
@@ -29,7 +29,7 @@ if __name__ == "__main__":  # necessary for Windows
         "train_size": 20000,
         "test_size": 5000,
         "epochs": 100,
-        "lr": 1e-3,
+        "lr": 3e-4,
         "seed": 42
     }
 
