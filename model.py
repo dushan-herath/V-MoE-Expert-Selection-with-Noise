@@ -105,7 +105,7 @@ class SelfAttentionBlock(nn.Module):
             x = norm(x)
             x, _ = attn(x, x, x)
             x = self.dropout(x)
-            x = x + x_res
+            #x = x + x_res
         return x
 
 
@@ -157,7 +157,7 @@ class ViTMoE(nn.Module):
         # 🔹 Top-k MoE
         self.moe = MoE(
             emb_size=emb_size,
-            num_experts=2,
+            num_experts=4,
             hidden_size=int(emb_size * mlp_ratio),
             dropout=dropout,
             k=2
