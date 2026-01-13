@@ -18,18 +18,18 @@ if __name__ == "__main__":  # necessary for Windows
     config = {
         "img_size": 32,
         "patch_size": 8,
-        "emb_size": 256,
+        "emb_size": 96,
         "depth": 6,
         "num_heads": 8,
         "mlp_ratio": 1.5,
-        "dropout": 0.2,
+        "dropout": 0.3,
         "moe_layers": [2, 4],
         "num_classes": 10,
         "batch_size": 64,
         "train_size": 20000,
         "test_size": 5000,
         "epochs": 100,
-        "lr": 3e-4,
+        "lr": 1e-3,
         "seed": 42
     }
 
@@ -72,7 +72,7 @@ if __name__ == "__main__":  # necessary for Windows
         print(f"  {k}: {v:,}")
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=config["lr"])
+    optimizer = optim.AdamW(model.parameters(), lr=config["lr"], weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
 
     # -----------------------------
