@@ -26,18 +26,19 @@ class PatchEmbedding(nn.Module):
 class Expert(nn.Module):
     def __init__(self, emb_size, hidden_size, dropout):
         super().__init__()
-        hidden_size2 = hidden_size * 2  # second hidden layer wider
+
+        # hidden_size should be smaller than emb_size * 4
+        # e.g. emb_size=256 → hidden_size=384 or 512
         self.net = nn.Sequential(
             nn.Linear(emb_size, hidden_size),
             nn.GELU(),
-            nn.Linear(hidden_size, hidden_size2),
-            nn.GELU(),
-            nn.Linear(hidden_size2, emb_size),
+            nn.Linear(hidden_size, emb_size),
             nn.Dropout(dropout)
         )
 
     def forward(self, x):
         return self.net(x)
+
 
 
 # ----------------------------------------------------
@@ -48,7 +49,7 @@ class MoE(nn.Module):
         super().__init__()
         self.num_experts = num_experts
         self.k = k
-        hidden_size = hidden_size or emb_size * 4
+        hidden_size = hidden_size or emb_size * 1.5
 
         self.experts = nn.ModuleList([
             Expert(emb_size, hidden_size, dropout)
@@ -147,10 +148,10 @@ class ViTMoE(nn.Module):
         # 🔹 Top-k MoE
         self.moe = MoE(
             emb_size=emb_size,
-            num_experts=4,
+            num_experts=2,
             hidden_size=int(emb_size * mlp_ratio),
             dropout=dropout,
-            k=4
+            k=2
         )
 
         self.norm = nn.LayerNorm(emb_size)
@@ -172,7 +173,7 @@ class ViTMoE(nn.Module):
         x = self.attn_block(x)
 
         # 2️⃣ Shared MLP
-        #x = x + self.pre_mlp(x)
+        x = x + self.pre_mlp(x)
 
         # 3️⃣ Top-k MoE
         x = self.moe(x)

@@ -21,7 +21,7 @@ if __name__ == "__main__":  # necessary for Windows
         "emb_size": 256,
         "depth": 6,
         "num_heads": 8,
-        "mlp_ratio": 4.0,
+        "mlp_ratio": 1.5,
         "dropout": 0.1,
         "moe_layers": [2, 4],
         "num_classes": 10,
