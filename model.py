@@ -108,7 +108,7 @@ class SelfAttentionBlock(nn.Module):
 class ViTMoE(nn.Module):
     def __init__(
         self,
-        img_size=32,
+        img_size=64,
         patch_size=4,
         in_channels=3,
         num_classes=10,
