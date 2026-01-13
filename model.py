@@ -26,10 +26,13 @@ class PatchEmbedding(nn.Module):
 class Expert(nn.Module):
     def __init__(self, emb_size, hidden_size, dropout):
         super().__init__()
+        hidden_size2 = hidden_size * 2  # second hidden layer wider
         self.net = nn.Sequential(
             nn.Linear(emb_size, hidden_size),
             nn.GELU(),
-            nn.Linear(hidden_size, emb_size),
+            nn.Linear(hidden_size, hidden_size2),
+            nn.GELU(),
+            nn.Linear(hidden_size2, emb_size),
             nn.Dropout(dropout)
         )
 
@@ -144,10 +147,10 @@ class ViTMoE(nn.Module):
         # 🔹 Top-k MoE
         self.moe = MoE(
             emb_size=emb_size,
-            num_experts=10,
+            num_experts=4,
             hidden_size=int(emb_size * mlp_ratio),
             dropout=dropout,
-            k=1
+            k=3
         )
 
         self.norm = nn.LayerNorm(emb_size)

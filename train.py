@@ -71,7 +71,6 @@ if __name__ == "__main__":  # necessary for Windows
     for k, v in param_summary.items():
         print(f"  {k}: {v:,}")
 
-
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=config["lr"])
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
@@ -81,12 +80,15 @@ if __name__ == "__main__":  # necessary for Windows
     # -----------------------------
     train_losses = []
     val_losses = []
+    train_accuracies = []
     val_accuracies = []
 
     print("Starting training...\n")
     for epoch in range(1, config["epochs"] + 1):
         model.train()
         running_loss = 0.0
+        running_correct = 0
+        running_total = 0
         start_time = time.time()
 
         # Progress bar for batches
@@ -100,10 +102,18 @@ if __name__ == "__main__":  # necessary for Windows
             optimizer.step()
 
             running_loss += loss.item() * images.size(0)
+
+            # Compute training accuracy
+            _, preds = torch.max(outputs, 1)
+            running_correct += (preds == labels).sum().item()
+            running_total += labels.size(0)
+
             loop.set_postfix({"Batch Loss": f"{loss.item():.4f}"})
 
         train_loss = running_loss / len(trainloader.dataset)
+        train_acc = running_correct / running_total
         train_losses.append(train_loss)
+        train_accuracies.append(train_acc)
 
         # Validation
         model.eval()
@@ -132,6 +142,7 @@ if __name__ == "__main__":  # necessary for Windows
 
         print(f"Epoch [{epoch}/{config['epochs']}] "
               f"Train Loss: {train_loss:.4f} "
+              f"Train Acc: {train_acc*100:.2f}% "
               f"Val Loss: {val_loss:.4f} "
               f"Val Acc: {val_acc*100:.2f}% "
               f"Time: {epoch_time:.1f}s")
@@ -139,7 +150,8 @@ if __name__ == "__main__":  # necessary for Windows
     # -----------------------------
     # Plot training curves
     # -----------------------------
-    plt.figure(figsize=(10,4))
+    plt.figure(figsize=(12,4))
+
     plt.subplot(1,2,1)
     plt.plot(range(1, config["epochs"]+1), train_losses, label="Train Loss")
     plt.plot(range(1, config["epochs"]+1), val_losses, label="Val Loss")
@@ -149,10 +161,11 @@ if __name__ == "__main__":  # necessary for Windows
     plt.legend()
 
     plt.subplot(1,2,2)
+    plt.plot(range(1, config["epochs"]+1), train_accuracies, label="Train Acc")
     plt.plot(range(1, config["epochs"]+1), val_accuracies, label="Val Acc")
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy")
-    plt.title("Validation Accuracy")
+    plt.title("Accuracy Curve")
     plt.legend()
 
     plt.tight_layout()
