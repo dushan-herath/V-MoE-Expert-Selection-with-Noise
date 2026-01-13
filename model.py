@@ -9,9 +9,11 @@ class PatchEmbedding(nn.Module):
     def __init__(self, in_channels=3, patch_size=4, emb_size=128, img_size=64):
         super().__init__()
         self.n_patches = (img_size // patch_size) ** 2
-        self.proj = nn.Conv2d(in_channels, emb_size,
-                              kernel_size=patch_size,
-                              stride=patch_size)
+        self.proj = nn.Conv2d(
+            in_channels, emb_size,
+            kernel_size=patch_size,
+            stride=patch_size
+        )
 
     def forward(self, x):
         x = self.proj(x)                  # [B, E, H', W']
@@ -21,106 +23,81 @@ class PatchEmbedding(nn.Module):
 
 
 # ----------------------------------------------------
-# Expert FFN
+# Transformer Expert (Attention + FFN)
 # ----------------------------------------------------
 class Expert(nn.Module):
-    def __init__(self, emb_size, hidden_size, dropout):
+    def __init__(self, emb_size, num_heads, hidden_size, dropout=0.1):
         super().__init__()
 
-        # hidden_size should be smaller than emb_size * 4
-        # e.g. emb_size=256 → hidden_size=384 or 512
-        self.net = nn.Sequential(
+        self.norm1 = nn.LayerNorm(emb_size)
+        self.attn = nn.MultiheadAttention(
+            emb_size, num_heads, batch_first=True
+        )
+
+        self.norm2 = nn.LayerNorm(emb_size)
+        self.mlp = nn.Sequential(
             nn.Linear(emb_size, hidden_size),
             nn.GELU(),
             nn.Linear(hidden_size, emb_size),
             nn.Dropout(dropout)
         )
 
-    def forward(self, x):
-        return self.net(x)
+        self.dropout = nn.Dropout(dropout)
 
+    def forward(self, x):
+        # Attention block
+        h = self.norm1(x)
+        h, _ = self.attn(h, h, h)
+        x = x + self.dropout(h)
+
+        # Feed-forward block
+        h = self.norm2(x)
+        h = self.mlp(h)
+        x = x + self.dropout(h)
+
+        return x
 
 
 # ----------------------------------------------------
-# Soft Weighted MoE
+# Mixture-of-Experts with Transformer Experts
 # ----------------------------------------------------
 class MoE(nn.Module):
-    def __init__(self, emb_size, num_experts=4, hidden_size=None, dropout=0.1):
+    def __init__(self, emb_size, num_heads, num_experts=4, hidden_size=None, dropout=0.1):
         super().__init__()
         self.num_experts = num_experts
-        hidden_size = hidden_size or int(emb_size * 1.5)
+        hidden_size = hidden_size or int(emb_size * 4)
 
         self.experts = nn.ModuleList([
-            Expert(emb_size, hidden_size, dropout)
+            Expert(emb_size, num_heads, hidden_size, dropout)
             for _ in range(num_experts)
         ])
 
-        # Gate produces a probability distribution over experts for each token
+        # Gate for routing tokens to experts
         self.gate = nn.Linear(emb_size, num_experts)
 
     def forward(self, x):
         # x: [B, N, E]
         B, N, E = x.shape
 
-        # Compute gate weights for all experts
-        gates = F.softmax(self.gate(x), dim=-1)   # [B, N, num_experts]
+        # Compute softmax gate
+        gates = F.softmax(self.gate(x), dim=-1)  # [B, N, K]
 
-        # Compute expert outputs
-        expert_outputs = []
-        for e in range(self.num_experts):
-            expert_out = self.experts[e](x)      # [B, N, E]
-            expert_outputs.append(expert_out.unsqueeze(-2))  # [B, N, 1, E]
+        # Apply all experts
+        expert_outs = []
+        for expert in self.experts:
+            expert_outs.append(expert(x).unsqueeze(-2))  # [B,N,1,E]
 
-        # Stack outputs: [B, N, num_experts, E]
-        expert_outputs = torch.cat(expert_outputs, dim=-2)
+        expert_outs = torch.cat(expert_outs, dim=-2)     # [B,N,K,E]
 
-        # Multiply by gate weights and sum: weighted sum over experts
-        gates = gates.unsqueeze(-1)                # [B, N, num_experts, 1]
-        out = (expert_outputs * gates).sum(dim=-2) # [B, N, E]
+        # Weighted sum using gate
+        gates = gates.unsqueeze(-1)                     # [B,N,K,1]
+        out = (expert_outs * gates).sum(dim=-2)        # [B,N,E]
 
         return out
 
 
 # ----------------------------------------------------
-# Single Attention Block
-# ----------------------------------------------------
-class SelfAttentionBlock(nn.Module):
-    def __init__(self, emb_size, num_heads, dropout):
-        super().__init__()
-
-        self.norm1 = nn.LayerNorm(emb_size)
-        self.attn = nn.MultiheadAttention(
-            emb_size,
-            num_heads,
-            dropout=dropout,
-            batch_first=True
-        )
-
-        self.proj = nn.Linear(emb_size, emb_size)
-        self.dropout = nn.Dropout(dropout)
-
-        # learnable residual scaling (very important for deep ViT & MoE)
-        self.gamma = nn.Parameter(torch.ones(1))
-
-    def forward(self, x):
-        # Pre-norm
-        x_norm = self.norm1(x)
-
-        # Self-attention
-        attn_out, _ = self.attn(x_norm, x_norm, x_norm)
-
-        # Output projection
-        attn_out = self.proj(attn_out)
-        attn_out = self.dropout(attn_out)
-
-        # Residual with scaling
-        x = x + self.gamma * attn_out
-
-        return x
-
-
-# ----------------------------------------------------
-# ViT-MoE (1 Attention + Pre-MLP + Top-k MoE)
+# ViT-MoE (Experts contain Attention + FFN)
 # ----------------------------------------------------
 class ViTMoE(nn.Module):
     def __init__(
@@ -130,11 +107,11 @@ class ViTMoE(nn.Module):
         in_channels=3,
         num_classes=10,
         emb_size=128,
-        depth=6,
+        depth=4,
         num_heads=4,
         mlp_ratio=4.0,
         dropout=0.1,
-        moe_layers=None
+        num_experts=4
     ):
         super().__init__()
 
@@ -148,28 +125,17 @@ class ViTMoE(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
 
-        self.attn_block = SelfAttentionBlock(
-            emb_size=emb_size,
-            num_heads=num_heads,
-            dropout=dropout
-        )
-
-        # 🔹 Shared Pre-MLP
-        self.pre_mlp = nn.Sequential(
-            nn.LayerNorm(emb_size),
-            nn.Linear(emb_size, int(emb_size * mlp_ratio)),
-            nn.GELU(),
-            nn.Linear(int(emb_size * mlp_ratio), emb_size),
-            nn.Dropout(dropout)
-        )
-
-        # 🔹 Top-k MoE
-        self.moe = MoE(
-            emb_size=emb_size,
-            num_experts=4,
-            hidden_size=int(emb_size * mlp_ratio),
-            dropout=dropout
-        )
+        # Stack of MoE transformer layers
+        self.layers = nn.ModuleList([
+            MoE(
+                emb_size=emb_size,
+                num_heads=num_heads,
+                num_experts=num_experts,
+                hidden_size=int(emb_size * mlp_ratio),
+                dropout=dropout
+            )
+            for _ in range(depth)
+        ])
 
         self.norm = nn.LayerNorm(emb_size)
         self.head = nn.Linear(emb_size, num_classes)
@@ -180,20 +146,15 @@ class ViTMoE(nn.Module):
     def forward(self, x):
         B = x.size(0)
 
-        x = self.patch_embed(x)                  # [B, N, E]
-        cls = self.cls_token.expand(B, -1, -1)   # [B, 1, E]
-        x = torch.cat([cls, x], dim=1)           # [B, N+1, E]
+        x = self.patch_embed(x)
+        cls = self.cls_token.expand(B, -1, -1)
+        x = torch.cat([cls, x], dim=1)
         x = x + self.pos_embed
         x = self.dropout(x)
 
-        # 1️⃣ Attention
-        x = self.attn_block(x)
-
-        # 2️⃣ Shared MLP
-        #x = x + self.pre_mlp(x)
-
-        # 3️⃣ Top-k MoE
-        x = self.moe(x)
+        # Apply MoE layers
+        for layer in self.layers:
+            x = layer(x)
 
         x = self.norm(x)
         cls_out = x[:, 0]
@@ -204,7 +165,18 @@ class ViTMoE(nn.Module):
 # Quick test
 # ----------------------------------------------------
 if __name__ == "__main__":
-    model = ViTMoE()
+    model = ViTMoE(
+        img_size=32,  # for CIFAR
+        patch_size=4,
+        in_channels=3,
+        num_classes=10,
+        emb_size=128,
+        depth=2,
+        num_heads=4,
+        mlp_ratio=2,
+        dropout=0.1,
+        num_experts=4
+    )
     x = torch.randn(8, 3, 32, 32)
     y = model(x)
     print("Output shape:", y.shape)
