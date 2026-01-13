@@ -23,7 +23,6 @@ if __name__ == "__main__":  # necessary for Windows
         "num_heads": 16,
         "mlp_ratio": 4,
         "dropout": 0.3,
-        "moe_layers": [2, 4],
         "num_classes": 10,
         "batch_size": 128,
         "train_size": 20000,
@@ -52,8 +51,7 @@ if __name__ == "__main__":  # necessary for Windows
         depth=config["depth"],
         num_heads=config["num_heads"],
         mlp_ratio=config["mlp_ratio"],
-        dropout=config["dropout"],
-        moe_layers=config["moe_layers"]
+        dropout=config["dropout"]
     ).to(device)
 
     # Count trainable parameters
