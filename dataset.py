@@ -31,9 +31,9 @@ class CIFAR10Small:
         # Data augmentations for small data
         train_transform = T.Compose([
             #T.RandomCrop(32, padding=4),
-            T.RandomHorizontalFlip(),
-            T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-            T.RandomRotation(15),
+            #T.RandomHorizontalFlip(),
+            #T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+            #T.RandomRotation(15),
             T.ToTensor(),
             T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
