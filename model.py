@@ -85,29 +85,20 @@ class MoE(nn.Module):
 # Single Attention Block
 # ----------------------------------------------------
 class SelfAttentionBlock(nn.Module):
-    def __init__(self, emb_size, num_heads, dropout, attn_depth=3):
+    def __init__(self, emb_size, num_heads, dropout):
         super().__init__()
-
-        self.attn_layers = nn.ModuleList([
-            nn.MultiheadAttention(emb_size, num_heads, batch_first=True)
-            for _ in range(attn_depth)
-        ])
-
-        self.norms = nn.ModuleList([
-            nn.LayerNorm(emb_size) for _ in range(attn_depth)
-        ])
-
+        self.norm = nn.LayerNorm(emb_size)
+        self.attn = nn.MultiheadAttention(
+            emb_size, num_heads, batch_first=True
+        )
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        for norm, attn in zip(self.norms, self.attn_layers):
-            x_res = x
-            x = norm(x)
-            x, _ = attn(x, x, x)
-            x = self.dropout(x)
-            #x = x + x_res
-        return x
-
+        x_res = x
+        x = self.norm(x)
+        x, _ = self.attn(x, x, x)
+        x = self.dropout(x)
+        return x + x_res
 
 
 # ----------------------------------------------------
@@ -142,7 +133,7 @@ class ViTMoE(nn.Module):
         self.attn_block = SelfAttentionBlock(
             emb_size=emb_size,
             num_heads=num_heads,
-            dropout=dropout,
+            dropout=dropout
         )
 
         # 🔹 Shared Pre-MLP
@@ -157,7 +148,7 @@ class ViTMoE(nn.Module):
         # 🔹 Top-k MoE
         self.moe = MoE(
             emb_size=emb_size,
-            num_experts=4,
+            num_experts=2,
             hidden_size=int(emb_size * mlp_ratio),
             dropout=dropout,
             k=2
@@ -172,27 +163,24 @@ class ViTMoE(nn.Module):
     def forward(self, x):
         B = x.size(0)
 
-        # Patch tokens only
         x = self.patch_embed(x)                  # [B, N, E]
-        x = x + self.pos_embed[:, :x.size(1)]    # match number of tokens
+        cls = self.cls_token.expand(B, -1, -1)   # [B, 1, E]
+        x = torch.cat([cls, x], dim=1)           # [B, N+1, E]
+        x = x + self.pos_embed
         x = self.dropout(x)
 
-        # 1️⃣ Deep Attention
+        # 1️⃣ Attention
         x = self.attn_block(x)
 
-        # 2️⃣ Shared MLP (still optional)
-        # x = x + self.pre_mlp(x)
+        # 2️⃣ Shared MLP
+        x = x + self.pre_mlp(x)
 
-        # 3️⃣ Top-k MoE (should normally be residual, but keeping your test)
+        # 3️⃣ Top-k MoE
         x = self.moe(x)
 
         x = self.norm(x)
-
-        # Global average pooling instead of CLS
-        x = x.mean(dim=1)                        # [B, E]
-
-        return self.head(x)
-
+        cls_out = x[:, 0]
+        return self.head(cls_out)
 
 
 # ----------------------------------------------------

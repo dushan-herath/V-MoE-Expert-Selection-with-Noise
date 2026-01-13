@@ -26,8 +26,8 @@ if __name__ == "__main__":  # necessary for Windows
         "moe_layers": [2, 4],
         "num_classes": 10,
         "batch_size": 64,
-        "train_size": 40000,
-        "test_size": 10000,
+        "train_size": 20000,
+        "test_size": 5000,
         "epochs": 100,
         "lr": 3e-4,
         "seed": 42
