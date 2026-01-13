@@ -147,10 +147,10 @@ class ViTMoE(nn.Module):
         # 🔹 Top-k MoE
         self.moe = MoE(
             emb_size=emb_size,
-            num_experts=10,
+            num_experts=4,
             hidden_size=int(emb_size * mlp_ratio),
             dropout=dropout,
-            k=8
+            k=4
         )
 
         self.norm = nn.LayerNorm(emb_size)
@@ -172,7 +172,7 @@ class ViTMoE(nn.Module):
         x = self.attn_block(x)
 
         # 2️⃣ Shared MLP
-        x = x + self.pre_mlp(x)
+        #x = x + self.pre_mlp(x)
 
         # 3️⃣ Top-k MoE
         x = self.moe(x)
