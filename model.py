@@ -98,7 +98,7 @@ class SelfAttentionBlock(nn.Module):
         x = self.norm(x)
         x, _ = self.attn(x, x, x)
         x = self.dropout(x)
-        return x + x_res
+        return x 
 
 
 # ----------------------------------------------------

@@ -17,15 +17,15 @@ if __name__ == "__main__":  # necessary for Windows
 
     config = {
         "img_size": 32,
-        "patch_size": 8,
-        "emb_size": 1024,
+        "patch_size": 4,
+        "emb_size": 256,
         "depth": 6,
         "num_heads": 8,
         "mlp_ratio": 4,
         "dropout": 0.3,
         "moe_layers": [2, 4],
         "num_classes": 10,
-        "batch_size": 256,
+        "batch_size": 128,
         "train_size": 20000,
         "test_size": 5000,
         "epochs": 100,
