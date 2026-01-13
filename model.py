@@ -42,41 +42,41 @@ class Expert(nn.Module):
 
 
 # ----------------------------------------------------
-# Top-k MoE
+# Soft Weighted MoE
 # ----------------------------------------------------
 class MoE(nn.Module):
-    def __init__(self, emb_size, num_experts=4, hidden_size=None, dropout=0.1, k=2):
+    def __init__(self, emb_size, num_experts=4, hidden_size=None, dropout=0.1):
         super().__init__()
         self.num_experts = num_experts
-        self.k = k
-        hidden_size = hidden_size or emb_size * 1.5
+        hidden_size = hidden_size or int(emb_size * 1.5)
 
         self.experts = nn.ModuleList([
             Expert(emb_size, hidden_size, dropout)
             for _ in range(num_experts)
         ])
 
+        # Gate produces a probability distribution over experts for each token
         self.gate = nn.Linear(emb_size, num_experts)
 
     def forward(self, x):
         # x: [B, N, E]
         B, N, E = x.shape
 
-        scores = self.gate(x)                        # [B, N, K]
-        topk_vals, topk_idx = torch.topk(scores, self.k, dim=-1)
-        gates = F.softmax(topk_vals, dim=-1)        # [B, N, k]
+        # Compute gate weights for all experts
+        gates = F.softmax(self.gate(x), dim=-1)   # [B, N, num_experts]
 
-        out = torch.zeros_like(x)
+        # Compute expert outputs
+        expert_outputs = []
+        for e in range(self.num_experts):
+            expert_out = self.experts[e](x)      # [B, N, E]
+            expert_outputs.append(expert_out.unsqueeze(-2))  # [B, N, 1, E]
 
-        for i in range(self.k):
-            idx = topk_idx[..., i]                  # [B, N]
-            gate = gates[..., i].unsqueeze(-1)      # [B, N, 1]
+        # Stack outputs: [B, N, num_experts, E]
+        expert_outputs = torch.cat(expert_outputs, dim=-2)
 
-            for e in range(self.num_experts):
-                mask = (idx == e)
-                if mask.any():
-                    expert_out = self.experts[e](x[mask])
-                    out[mask] += gate[mask] * expert_out
+        # Multiply by gate weights and sum: weighted sum over experts
+        gates = gates.unsqueeze(-1)                # [B, N, num_experts, 1]
+        out = (expert_outputs * gates).sum(dim=-2) # [B, N, E]
 
         return out
 
@@ -151,8 +151,7 @@ class ViTMoE(nn.Module):
             emb_size=emb_size,
             num_experts=10,
             hidden_size=int(emb_size * mlp_ratio),
-            dropout=dropout,
-            k=10
+            dropout=dropout
         )
 
         self.norm = nn.LayerNorm(emb_size)
