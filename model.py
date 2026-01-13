@@ -49,24 +49,28 @@ class Expert(nn.Module):
 # Router
 # -------------------------
 class Router(nn.Module):
-    def __init__(self, emb_size, num_experts):
+    def __init__(self, emb_size, num_experts, top_k=2):
         super().__init__()
+        self.top_k = top_k
         self.gate = nn.Linear(emb_size, num_experts)
 
     def forward(self, x):
         # x: [B, N, E]
-        # Returns softmax probabilities per token
-        return F.softmax(self.gate(x), dim=-1)  # [B, N, num_experts]
+        logits = self.gate(x)                # [B, N, num_experts]
+        topk_val, topk_idx = torch.topk(logits, k=self.top_k, dim=-1)  # top-k experts
+        probs = F.softmax(topk_val, dim=-1)  # normalized weights
+        return topk_idx, probs                # indices + weights
 
 # -------------------------
-# MoE Layer (Parallel Experts)
+# MoE Layer with Top-K routing
 # -------------------------
 class MoE(nn.Module):
-    def __init__(self, emb_size, num_heads, num_experts=4, hidden_size=None, dropout=0.1):
+    def __init__(self, emb_size, num_heads, num_experts=4, hidden_size=None, dropout=0.1, top_k=2):
         super().__init__()
         hidden_size = hidden_size or emb_size * 4
         self.num_experts = num_experts
-        self.router = Router(emb_size, num_experts)
+        self.top_k = top_k
+        self.router = Router(emb_size, num_experts, top_k)
         self.experts = nn.ModuleList([
             Expert(emb_size, num_heads, hidden_size, dropout)
             for _ in range(num_experts)
@@ -76,25 +80,28 @@ class MoE(nn.Module):
         # x: [B, N, E]
         B, N, E = x.shape
 
-        # Get routing probabilities
-        gates = self.router(x)  # [B, N, K]
+        # Top-K routing
+        topk_idx, topk_weights = self.router(x)  # [B, N, K], [B, N, K]
 
-        # Run all experts on all tokens
-        expert_outputs = []
-        for expert in self.experts:
-            expert_outputs.append(expert(x).unsqueeze(-2))  # [B, N, 1, E]
+        out = torch.zeros_like(x)                # [B, N, E]
 
-        # Stack experts: [B, N, K, E]
-        expert_outputs = torch.cat(expert_outputs, dim=-2)
+        # Flatten batch and sequence to select tokens
+        for k in range(self.top_k):
+            idx = topk_idx[:, :, k]             # [B, N]
+            w = topk_weights[:, :, k].unsqueeze(-1)  # [B, N, 1]
 
-        # Weighted sum by gate probabilities
-        gates = gates.unsqueeze(-1)          # [B, N, K, 1]
-        out = (expert_outputs * gates).sum(dim=-2)  # [B, N, E]
+            # Process each expert separately
+            for e in range(self.num_experts):
+                mask = idx == e                # [B, N]
+                if mask.any():
+                    tokens = x[mask]          # [num_tokens, E]
+                    tokens_out = self.experts[e](tokens)  # [num_tokens, E]
+                    out[mask] += tokens_out * w[mask]    # weighted sum
 
         return out
 
 # -------------------------
-# ViT-MoE (Router -> Parallel Experts -> Average -> Classify)
+# ViT-MoE Model
 # -------------------------
 class ViTMoE(nn.Module):
     def __init__(
@@ -107,6 +114,7 @@ class ViTMoE(nn.Module):
         num_heads=4,
         hidden_ratio=4,
         num_experts=4,
+        top_k=2,
         dropout=0.1
     ):
         super().__init__()
@@ -116,13 +124,13 @@ class ViTMoE(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, self.patch_embed.n_patches + 1, emb_size))
         self.dropout = nn.Dropout(dropout)
 
-        # Single MoE layer
         self.moe = MoE(
             emb_size=emb_size,
             num_heads=num_heads,
             num_experts=num_experts,
             hidden_size=int(emb_size * hidden_ratio),
-            dropout=dropout
+            dropout=dropout,
+            top_k=top_k
         )
 
         self.norm = nn.LayerNorm(emb_size)
@@ -139,11 +147,11 @@ class ViTMoE(nn.Module):
         x = x + self.pos_embed
         x = self.dropout(x)
 
-        # MoE: Router -> Parallel Experts
+        # Top-K MoE
         x = self.moe(x)
 
         x = self.norm(x)
-        cls_out = x[:, 0]                             # [B, E]
+        cls_out = x[:, 0]
         return self.head(cls_out)
 
 # -------------------------
@@ -159,6 +167,7 @@ if __name__ == "__main__":
         num_heads=4,
         hidden_ratio=2,
         num_experts=4,
+        top_k=2,
         dropout=0.1
     )
     x = torch.randn(8, 3, 32, 32)
