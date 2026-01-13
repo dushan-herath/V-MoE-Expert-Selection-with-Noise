@@ -27,17 +27,28 @@ class Expert(nn.Module):
     def __init__(self, emb_size, hidden_size, dropout):
         super().__init__()
 
-        # hidden_size should be smaller than emb_size * 4
-        # e.g. emb_size=256 → hidden_size=384 or 512
-        self.net = nn.Sequential(
-            nn.Linear(emb_size, hidden_size),
-            nn.GELU(),
-            nn.Linear(hidden_size, emb_size),
-            nn.Dropout(dropout)
-        )
+        # Gated FFN (SwiGLU style)
+        self.fc1 = nn.Linear(emb_size, hidden_size)
+        self.fc2 = nn.Linear(emb_size, hidden_size)
+        self.fc3 = nn.Linear(hidden_size, emb_size)
+
+        self.act = nn.GELU()
+        self.norm = nn.LayerNorm(emb_size)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        return self.net(x)
+        residual = x
+        x = self.norm(x)
+
+        gate = self.act(self.fc1(x))
+        value = self.fc2(x)
+        x = gate * value                  # gating
+
+        x = self.fc3(x)
+        x = self.dropout(x)
+
+        return x + residual               # residual learning
+
 
 
 
@@ -149,7 +160,7 @@ class ViTMoE(nn.Module):
         # 🔹 Top-k MoE
         self.moe = MoE(
             emb_size=emb_size,
-            num_experts=64,
+            num_experts=4,
             hidden_size=int(emb_size * mlp_ratio),
             dropout=dropout
         )
