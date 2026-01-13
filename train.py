@@ -25,7 +25,7 @@ if __name__ == "__main__":  # necessary for Windows
         "dropout": 0.3,
         "moe_layers": [2, 4],
         "num_classes": 10,
-        "batch_size": 64,
+        "batch_size": 256,
         "train_size": 20000,
         "test_size": 5000,
         "epochs": 100,
