@@ -38,11 +38,13 @@ class Expert(nn.Module):
 
 
 # ----------------------------------------------------
-# Mixture of Experts
+# Top-k MoE
 # ----------------------------------------------------
 class MoE(nn.Module):
-    def __init__(self, emb_size, num_experts=4, hidden_size=None, dropout=0.1):
+    def __init__(self, emb_size, num_experts=4, hidden_size=None, dropout=0.1, k=2):
         super().__init__()
+        self.num_experts = num_experts
+        self.k = k
         hidden_size = hidden_size or emb_size * 4
 
         self.experts = nn.ModuleList([
@@ -54,20 +56,29 @@ class MoE(nn.Module):
 
     def forward(self, x):
         # x: [B, N, E]
-        gate_scores = F.softmax(self.gate(x), dim=-1)   # [B, N, K]
+        B, N, E = x.shape
 
-        expert_outputs = torch.stack(
-            [expert(x) for expert in self.experts], dim=-1
-        )  # [B, N, E, K]
+        scores = self.gate(x)                        # [B, N, K]
+        topk_vals, topk_idx = torch.topk(scores, self.k, dim=-1)
+        gates = F.softmax(topk_vals, dim=-1)        # [B, N, k]
 
-        gate_scores = gate_scores.unsqueeze(2)          # [B, N, 1, K]
-        out = (expert_outputs * gate_scores).sum(-1)   # [B, N, E]
+        out = torch.zeros_like(x)
+
+        for i in range(self.k):
+            idx = topk_idx[..., i]                  # [B, N]
+            gate = gates[..., i].unsqueeze(-1)      # [B, N, 1]
+
+            for e in range(self.num_experts):
+                mask = (idx == e)
+                if mask.any():
+                    expert_out = self.experts[e](x[mask])
+                    out[mask] += gate[mask] * expert_out
 
         return out
 
 
 # ----------------------------------------------------
-# Single Attention Block (NO MLP inside)
+# Single Attention Block
 # ----------------------------------------------------
 class SelfAttentionBlock(nn.Module):
     def __init__(self, emb_size, num_heads, dropout):
@@ -87,7 +98,7 @@ class SelfAttentionBlock(nn.Module):
 
 
 # ----------------------------------------------------
-# ViT-MoE (1 Attention + 1 MoE)
+# ViT-MoE (1 Attention + Pre-MLP + Top-k MoE)
 # ----------------------------------------------------
 class ViTMoE(nn.Module):
     def __init__(
@@ -97,11 +108,11 @@ class ViTMoE(nn.Module):
         in_channels=3,
         num_classes=10,
         emb_size=128,
-        depth=6,          # kept for train.py compatibility
+        depth=6,
         num_heads=4,
         mlp_ratio=4.0,
         dropout=0.1,
-        moe_layers=None  # ignored, kept for compatibility
+        moe_layers=None
     ):
         super().__init__()
 
@@ -115,19 +126,28 @@ class ViTMoE(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
 
-        # Exactly ONE attention block
         self.attn_block = SelfAttentionBlock(
             emb_size=emb_size,
             num_heads=num_heads,
             dropout=dropout
         )
 
-        # Exactly ONE MoE block
+        # 🔹 Shared Pre-MLP
+        self.pre_mlp = nn.Sequential(
+            nn.LayerNorm(emb_size),
+            nn.Linear(emb_size, int(emb_size * mlp_ratio)),
+            nn.GELU(),
+            nn.Linear(int(emb_size * mlp_ratio), emb_size),
+            nn.Dropout(dropout)
+        )
+
+        # 🔹 Top-k MoE
         self.moe = MoE(
             emb_size=emb_size,
             num_experts=4,
             hidden_size=int(emb_size * mlp_ratio),
-            dropout=dropout
+            dropout=dropout,
+            k=2
         )
 
         self.norm = nn.LayerNorm(emb_size)
@@ -148,7 +168,10 @@ class ViTMoE(nn.Module):
         # 1️⃣ Attention
         x = self.attn_block(x)
 
-        # 2️⃣ MoE
+        # 2️⃣ Shared MLP
+        x = x + self.pre_mlp(x)
+
+        # 3️⃣ Top-k MoE
         x = self.moe(x)
 
         x = self.norm(x)
