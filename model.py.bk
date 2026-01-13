@@ -1,0 +1,155 @@
+# model.py
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class PatchEmbedding(nn.Module):
+    """Convert image to patch embeddings"""
+    def __init__(self, in_channels=3, patch_size=4, emb_size=128, img_size=32):
+        super().__init__()
+        self.patch_size = patch_size
+        self.n_patches = (img_size // patch_size) ** 2
+        self.proj = nn.Conv2d(in_channels, emb_size, kernel_size=patch_size, stride=patch_size)
+
+    def forward(self, x):
+        x = self.proj(x)  # [B, emb_size, H/patch, W/patch]
+        x = x.flatten(2)  # [B, emb_size, n_patches]
+        x = x.transpose(1, 2)  # [B, n_patches, emb_size]
+        return x
+
+
+class MoE(nn.Module):
+    """Simple Mixture of Experts Layer"""
+    def __init__(self, emb_size, num_experts=4, hidden_size=None, dropout=0.1):
+        super().__init__()
+        self.num_experts = num_experts
+        self.hidden_size = hidden_size or emb_size * 4
+        self.experts = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(emb_size, self.hidden_size),
+                nn.GELU(),
+                nn.Linear(self.hidden_size, emb_size),
+                nn.Dropout(dropout)
+            )
+            for _ in range(num_experts)
+        ])
+        # gating network
+        self.gate = nn.Linear(emb_size, num_experts)
+
+    def forward(self, x):
+        """
+        x: [B, N, emb_size]  (tokens)
+        Returns weighted sum of experts per token
+        """
+        B, N, E = x.shape
+        gate_scores = F.softmax(self.gate(x), dim=-1)  # [B, N, num_experts]
+
+        # collect expert outputs
+        expert_outs = torch.stack([expert(x) for expert in self.experts], dim=-1)  # [B, N, E, num_experts]
+        gate_scores = gate_scores.unsqueeze(2)  # [B, N, 1, num_experts]
+        out = (expert_outs * gate_scores).sum(-1)  # weighted sum: [B, N, E]
+        return out
+
+
+class TransformerEncoderBlock(nn.Module):
+    """Transformer block with optional MoE MLP"""
+    def __init__(self, emb_size=128, num_heads=4, mlp_ratio=4.0, dropout=0.1, use_moe=True):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(emb_size)
+        self.attn = nn.MultiheadAttention(embed_dim=emb_size, num_heads=num_heads, batch_first=True)
+        self.norm2 = nn.LayerNorm(emb_size)
+        self.use_moe = use_moe
+        if use_moe:
+            self.mlp = MoE(emb_size, num_experts=4, hidden_size=int(emb_size*mlp_ratio), dropout=dropout)
+        else:
+            self.mlp = nn.Sequential(
+                nn.Linear(emb_size, int(emb_size*mlp_ratio)),
+                nn.GELU(),
+                nn.Linear(int(emb_size*mlp_ratio), emb_size),
+                nn.Dropout(dropout)
+            )
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # Self-attention
+        x_res = x
+        x = self.norm1(x)
+        x, _ = self.attn(x, x, x)
+        x = self.dropout(x)
+        x = x + x_res
+
+        # MLP / MoE
+        x_res = x
+        x = self.norm2(x)
+        x = self.mlp(x)
+        x = x + x_res
+        return x
+
+
+class ViTMoE(nn.Module):
+    def __init__(self,
+                 img_size=32,
+                 patch_size=4,
+                 in_channels=3,
+                 num_classes=10,
+                 emb_size=128,
+                 depth=6,
+                 num_heads=4,
+                 mlp_ratio=4.0,
+                 dropout=0.1,
+                 moe_layers=None):
+        """
+        moe_layers: list of block indices (0-based) to use MoE instead of normal MLP
+        """
+        super().__init__()
+        self.patch_embed = PatchEmbedding(in_channels, patch_size, emb_size, img_size)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, emb_size))
+        self.pos_embed = nn.Parameter(torch.zeros(1, self.patch_embed.n_patches + 1, emb_size))
+        self.dropout = nn.Dropout(dropout)
+
+        moe_layers = moe_layers or []
+        self.blocks = nn.ModuleList([
+            TransformerEncoderBlock(emb_size, num_heads, mlp_ratio, dropout, use_moe=(i in moe_layers))
+            for i in range(depth)
+        ])
+
+        self.norm = nn.LayerNorm(emb_size)
+        self.head = nn.Linear(emb_size, num_classes)
+
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.trunc_normal_(m.weight, std=0.02)
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.ones_(m.weight)
+            nn.init.zeros_(m.bias)
+
+    def forward(self, x):
+        B = x.size(0)
+        x = self.patch_embed(x)
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x = x + self.pos_embed
+        x = self.dropout(x)
+
+        for blk in self.blocks:
+            x = blk(x)
+
+        x = self.norm(x)
+        cls_out = x[:, 0]
+        out = self.head(cls_out)
+        return out
+
+
+if __name__ == "__main__":
+    # quick test
+    model = ViTMoE(img_size=32, patch_size=4, num_classes=10, depth=6, moe_layers=[2,4])
+    dummy = torch.randn(8, 3, 32, 32)
+    out = model(dummy)
+    print("Output shape:", out.shape)  # [8, 10]
