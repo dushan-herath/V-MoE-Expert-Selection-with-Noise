@@ -27,28 +27,17 @@ class Expert(nn.Module):
     def __init__(self, emb_size, hidden_size, dropout):
         super().__init__()
 
-        # Gated FFN (SwiGLU style)
-        self.fc1 = nn.Linear(emb_size, hidden_size)
-        self.fc2 = nn.Linear(emb_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, emb_size)
-
-        self.act = nn.GELU()
-        self.norm = nn.LayerNorm(emb_size)
-        self.dropout = nn.Dropout(dropout)
+        # hidden_size should be smaller than emb_size * 4
+        # e.g. emb_size=256 → hidden_size=384 or 512
+        self.net = nn.Sequential(
+            nn.Linear(emb_size, hidden_size),
+            nn.GELU(),
+            nn.Linear(hidden_size, emb_size),
+            nn.Dropout(dropout)
+        )
 
     def forward(self, x):
-        residual = x
-        x = self.norm(x)
-
-        gate = self.act(self.fc1(x))
-        value = self.fc2(x)
-        x = gate * value                  # gating
-
-        x = self.fc3(x)
-        x = self.dropout(x)
-
-        return x + residual               # residual learning
-
+        return self.net(x)
 
 
 

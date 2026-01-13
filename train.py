@@ -16,7 +16,7 @@ if __name__ == "__main__":  # necessary for Windows
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     config = {
-        "img_size": 32,
+        "img_size": 64,
         "patch_size": 4,
         "emb_size": 128,
         "depth": 6,
