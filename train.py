@@ -22,7 +22,7 @@ if __name__ == "__main__":  # necessary for Windows
         "num_heads": 8,
         "dropout": 0.3,
         "num_classes": 10,
-        "batch_size": 64,
+        "batch_size": 32,
         "train_size": 10000,
         "test_size": 2500,
         "epochs": 100,
