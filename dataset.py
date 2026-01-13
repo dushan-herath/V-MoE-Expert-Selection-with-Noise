@@ -30,8 +30,8 @@ class CIFAR10Small:
     def _build(self):
         # Data augmentations for small data
         train_transform = T.Compose([
-            T.RandomCrop(32, padding=4),
-            T.RandomHorizontalFlip(),
+            #T.RandomCrop(32, padding=4),
+            #T.RandomHorizontalFlip(),
             T.ToTensor(),
             T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
