@@ -98,6 +98,10 @@ class SelfAttentionBlock(nn.Module):
         x = self.norm(x)
         x, _ = self.attn(x, x, x)
         x = self.dropout(x)
+        x = self.norm(x)
+        x, _ = self.attn(x, x, x)
+        x = self.dropout(x)
+        x = self.norm(x)
         return x 
 
 
@@ -173,7 +177,7 @@ class ViTMoE(nn.Module):
         x = self.attn_block(x)
 
         # 2️⃣ Shared MLP
-        x = x + self.pre_mlp(x)
+        #x = x + self.pre_mlp(x)
 
         # 3️⃣ Top-k MoE
         x = self.moe(x)
