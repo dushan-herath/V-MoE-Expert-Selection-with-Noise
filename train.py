@@ -19,9 +19,7 @@ if __name__ == "__main__":  # necessary for Windows
         "img_size": 64,
         "patch_size": 4,
         "emb_size": 128,
-        "depth": 6,
         "num_heads": 8,
-        "mlp_ratio": 3.0,
         "dropout": 0.3,
         "num_classes": 10,
         "batch_size": 64,
@@ -48,9 +46,7 @@ if __name__ == "__main__":  # necessary for Windows
         patch_size=config["patch_size"],
         num_classes=config["num_classes"],
         emb_size=config["emb_size"],
-        depth=config["depth"],
         num_heads=config["num_heads"],
-        mlp_ratio=config["mlp_ratio"],
         dropout=config["dropout"]
     ).to(device)
 
