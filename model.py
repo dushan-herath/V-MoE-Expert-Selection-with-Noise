@@ -149,10 +149,10 @@ class ViTMoE(nn.Module):
         # 🔹 Top-k MoE
         self.moe = MoE(
             emb_size=emb_size,
-            num_experts=2,
+            num_experts=10,
             hidden_size=int(emb_size * mlp_ratio),
             dropout=dropout,
-            k=2
+            k=10
         )
 
         self.norm = nn.LayerNorm(emb_size)
