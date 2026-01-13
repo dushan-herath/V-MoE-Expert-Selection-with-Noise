@@ -129,8 +129,8 @@ class ViTMoE(nn.Module):
             dropout=dropout
         )
 
-        self.norm = nn.LayerNorm(emb_size*2)
-        self.head = nn.Linear(emb_size*2, num_classes)
+        self.norm = nn.LayerNorm(emb_size)
+        self.head = nn.Linear(emb_size, num_classes)
 
         nn.init.trunc_normal_(self.cls_token, std=0.02)
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
