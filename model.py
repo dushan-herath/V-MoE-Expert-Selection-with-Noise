@@ -6,7 +6,7 @@ import torch.nn.functional as F
 # Patch embedding
 # ----------------------------------------------------
 class PatchEmbedding(nn.Module):
-    def __init__(self, in_channels=3, patch_size=4, emb_size=128, img_size=32):
+    def __init__(self, in_channels=3, patch_size=4, emb_size=128, img_size=64):
         super().__init__()
         self.n_patches = (img_size // patch_size) ** 2
         self.proj = nn.Conv2d(in_channels, emb_size,
