@@ -47,6 +47,7 @@ class MoE(nn.Module):
     def __init__(self, emb_size, num_experts=4, hidden_size=None, k=1, dropout=0.1):
         super().__init__()
         self.k = k
+        self.num_experts = num_experts
         hidden_size = hidden_size or int(emb_size * 1.5)
 
         self.experts = nn.ModuleList([
@@ -57,29 +58,50 @@ class MoE(nn.Module):
         self.router = nn.Linear(emb_size, num_experts)
 
     def forward(self, x):
-        # x: [B, N, E]
+        """
+        x: [B, N, E]
+        """
         B, N, E = x.shape
+        T = B * N  # total tokens
 
-        scores = F.softmax(self.router(x), dim=-1)       # [B, N, num_experts]
-        topk_vals, topk_idx = torch.topk(scores, self.k, dim=-1)
+        # -------------------------------
+        # 1. Top-K routing (hard, sparse)
+        # -------------------------------
+        logits = self.router(x)                    # [B, N, num_experts]
+        _, topk_idx = torch.topk(logits, self.k, dim=-1)  # [B, N, k]
 
-        flat_x = x.reshape(B * N, E)
-        flat_idx = topk_idx.reshape(B * N * self.k)
+        flat_x = x.view(T, E)                      # [T, E]
+        flat_topk = topk_idx.view(T, self.k)       # [T, k]
 
-        expert_outputs = torch.stack(
-            [expert(flat_x) for expert in self.experts],
-            dim=1
-        )  # [B*N, num_experts, E]
+        # Output buffer
+        out = torch.zeros_like(flat_x)             # [T, E]
 
-        batch_idx = torch.arange(B * N, device=x.device).repeat_interleave(self.k)
-        topk_outs = expert_outputs[batch_idx, flat_idx]  # [B*N*k, E]
+        # -------------------------------
+        # 2. Selective expert execution
+        # -------------------------------
+        for expert_id, expert in enumerate(self.experts):
+            # mask: tokens routed to this expert
+            mask = (flat_topk == expert_id)         # [T, k]
+            token_mask = mask.any(dim=1)            # [T]
 
-        # Weighted Top-K aggregation
-        weights = topk_vals.reshape(B, N, self.k, 1)
-        topk_outs = topk_outs.reshape(B, N, self.k, E)
-        out = (topk_outs * weights).sum(dim=2)
+            if not token_mask.any():
+                continue
 
-        return out
+            tokens = flat_x[token_mask]             # [M, E]
+            expert_out = expert(tokens)             # [M, E]
+
+            # Count how many times token was routed here
+            counts = mask[token_mask].sum(dim=1, keepdim=True)  # [M, 1]
+
+            out[token_mask] += expert_out * counts
+
+        # -------------------------------
+        # 3. Average over top-K experts
+        # -------------------------------
+        out = out / self.k                          # simple mean
+
+        return out.view(B, N, E)
+
 
 
 # ----------------------------------------------------
