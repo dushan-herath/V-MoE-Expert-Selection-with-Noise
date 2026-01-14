@@ -12,7 +12,7 @@ class PatchEmbedding(nn.Module):
         patch_size=4,
         emb_size=128,
         img_size=32,
-        stem_channels=64
+        stem_channels=128
     ):
         super().__init__()
 
