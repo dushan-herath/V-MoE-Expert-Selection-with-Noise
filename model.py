@@ -43,70 +43,61 @@ class Expert(nn.Module):
 # ----------------------------------------------------
 # Vectorized Top-K MoE (with optional routing output)
 # ----------------------------------------------------
-# ----------------------------------------------------
-# Vectorized Top-K MoE with Load Balancing
-# ----------------------------------------------------
 class MoE(nn.Module):
-    def __init__(self, emb_size, num_experts=4, hidden_size=None, k=1, dropout=0.1, noise=0.1):
+    def __init__(self, emb_size, num_experts=4, hidden_size=None, k=1, dropout=0.1):
         super().__init__()
         self.k = k
         self.num_experts = num_experts
         hidden_size = hidden_size or int(emb_size * 1.5)
-        self.noise = noise  # router noise during training
 
         self.experts = nn.ModuleList([
             Expert(emb_size, hidden_size, dropout)
             for _ in range(num_experts)
         ])
+
         self.router = nn.Linear(emb_size, num_experts)
 
     def forward(self, x, return_routing=False):
         """
         x: [B, N, E]
-        return_routing: if True, returns top-k expert indices
+        return_routing: if True, returns top-k expert indices for analysis
         """
         B, N, E = x.shape
-        T = B * N
+        T = B * N  # total tokens
 
-        # 1. Router logits
-        logits = self.router(x)  # [B, N, num_experts]
-        if self.training and self.noise > 0:
-            logits = logits + torch.randn_like(logits) * self.noise  # add small noise
-
-        # 2. Top-K routing
+        # 1. Top-K routing (hard, sparse)
+        logits = self.router(x)                     # [B, N, num_experts]
         _, topk_idx = torch.topk(logits, self.k, dim=-1)  # [B, N, k]
 
-        flat_x = x.reshape(T, E)             # [T, E]
-        flat_topk = topk_idx.reshape(T, self.k)  # [T, k]
-        out = torch.zeros_like(flat_x)       # [T, E]
+        flat_x = x.reshape(T, E)                      # [T, E]
+        flat_topk = topk_idx.reshape(T, self.k)       # [T, k]
 
-        # 3. Expert execution
+        # Output buffer
+        out = torch.zeros_like(flat_x)             # [T, E]
+
+        # 2. Selective expert execution
         for expert_id, expert in enumerate(self.experts):
             mask = (flat_topk == expert_id)         # [T, k]
             token_mask = mask.any(dim=1)            # [T]
+
             if not token_mask.any():
                 continue
-            tokens = flat_x[token_mask]
-            expert_out = expert(tokens)
-            counts = mask[token_mask].sum(dim=1, keepdim=True)
+
+            tokens = flat_x[token_mask]             # [M, E]
+            expert_out = expert(tokens)             # [M, E]
+
+            # Count how many times token was routed here
+            counts = mask[token_mask].sum(dim=1, keepdim=True)  # [M, 1]
             out[token_mask] += expert_out * counts
 
-        # 4. Average over top-K experts
+        # 3. Average over top-K experts
         out = out / self.k
         out = out.view(B, N, E)
 
-        # 5. Compute load balancing loss
-        with torch.no_grad():
-            counts = torch.zeros(self.num_experts, device=x.device)
-            for i in range(self.num_experts):
-                counts[i] = (topk_idx == i).sum()
-            fraction = counts / (T * self.k)
-            self.load_balance_loss = fraction.mul(fraction).sum() * self.num_experts
-
         if return_routing:
-            return out, topk_idx
-        return out
+            return out, topk_idx  # <-- new minimal change
 
+        return out
 
 
 # ----------------------------------------------------
