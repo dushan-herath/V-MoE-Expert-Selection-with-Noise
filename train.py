@@ -16,17 +16,17 @@ if __name__ == "__main__":  # necessary for Windows
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     config = {
-        "img_size": 64,
+        "img_size": 32,
         "patch_size": 4,
         "emb_size": 128,
         "num_heads": 8,
         "dropout": 0.3,
         "num_classes": 10,
         "batch_size": 32,
-        "train_size": 10000,
-        "test_size": 2500,
+        "train_size": 20000,
+        "test_size": 5000,
         "epochs": 100,
-        "lr": 3e-4,
+        "lr": 1e-3,
         "seed": 42
     }
 
@@ -66,7 +66,7 @@ if __name__ == "__main__":  # necessary for Windows
         print(f"  {k}: {v:,}")
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=config["lr"], weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=config["lr"])
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
 
     # -----------------------------
