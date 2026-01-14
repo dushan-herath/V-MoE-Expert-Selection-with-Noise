@@ -110,6 +110,9 @@ if __name__ == "__main__":  # necessary for Windows
     train_accuracies = []
     val_accuracies = []
 
+    best_val_acc = 0.0
+    best_model_path = "best_vit_moe.pth"
+    
     print("Starting training...\n")
     for epoch in range(1, config["epochs"] + 1):
         model.train()
@@ -178,6 +181,20 @@ if __name__ == "__main__":  # necessary for Windows
               f"Val Acc: {val_acc*100:.2f}% "
               f"Experts → {expert_str} "
               f"Time: {epoch_time:.1f}s")
+
+        # Save the best model
+
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'val_acc': val_acc,
+                'val_loss': val_loss
+            }, best_model_path)
+            print(f"--> Best model saved at epoch {epoch} with Val Acc: {val_acc*100:.2f}%")
 
     # -----------------------------
     # Plot training curves
