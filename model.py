@@ -117,7 +117,7 @@ class ViTMoE(nn.Module):
         emb_size=128,
         depth=6,
         num_heads=4,
-        mlp_ratio=10.0,
+        mlp_ratio=6.0,
         dropout=0.1,
         moe_layers=None,
         k=3
