@@ -105,6 +105,9 @@ if __name__ == "__main__":  # necessary for Windows
     # -----------------------------
     # Training Loop
     # -----------------------------
+    # -----------------------------
+    # Training Loop
+    # -----------------------------
     train_losses = []
     val_losses = []
     train_accuracies = []
@@ -122,13 +125,22 @@ if __name__ == "__main__":  # necessary for Windows
         for images, labels in loop:
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
-            outputs = model(images)
+
+            # --- forward pass with routing ---
+            outputs, _ = model(images, return_routing=True)  # <-- minimal change
+
+            # --- compute main loss ---
             loss = criterion(outputs, labels)
+
+            # --- add load balancing loss from MoE ---
+            if hasattr(model.moe, "load_balance_loss"):
+                loss += 0.01 * model.moe.load_balance_loss  # <-- minimal change, weight=0.01
+
+            # --- backward and step ---
             loss.backward()
             optimizer.step()
 
             running_loss += loss.item() * images.size(0)
-
             _, preds = torch.max(outputs, 1)
             running_correct += (preds == labels).sum().item()
             running_total += labels.size(0)
@@ -140,7 +152,9 @@ if __name__ == "__main__":  # necessary for Windows
         train_losses.append(train_loss)
         train_accuracies.append(train_acc)
 
-        # Validation
+        # -----------------------------
+        # Validation (unchanged)
+        # -----------------------------
         model.eval()
         val_loss = 0.0
         correct = 0
@@ -172,12 +186,13 @@ if __name__ == "__main__":  # necessary for Windows
         expert_str = " | ".join([f"E{i}: {p:.2f}" for i, p in enumerate(expert_probs)])
 
         print(f"Epoch [{epoch}/{config['epochs']}] "
-              f"Train Loss: {train_loss:.4f} "
-              f"Train Acc: {train_acc*100:.2f}% "
-              f"Val Loss: {val_loss:.4f} "
-              f"Val Acc: {val_acc*100:.2f}% "
-              f"Experts → {expert_str} "
-              f"Time: {epoch_time:.1f}s")
+            f"Train Loss: {train_loss:.4f} "
+            f"Train Acc: {train_acc*100:.2f}% "
+            f"Val Loss: {val_loss:.4f} "
+            f"Val Acc: {val_acc*100:.2f}% "
+            f"Experts → {expert_str} "
+            f"Time: {epoch_time:.1f}s")
+
 
     # -----------------------------
     # Plot training curves
