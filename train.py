@@ -17,7 +17,7 @@ if __name__ == "__main__":  # necessary for Windows
 
     config = {
         "img_size": 32,
-        "patch_size": 2,
+        "patch_size": 4,
         "emb_size": 128,
         "num_heads": 8,
         "dropout": 0.3,

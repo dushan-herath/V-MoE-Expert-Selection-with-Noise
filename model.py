@@ -6,17 +6,42 @@ import torch.nn.functional as F
 # Patch embedding
 # ----------------------------------------------------
 class PatchEmbedding(nn.Module):
-    def __init__(self, in_channels=3, patch_size=4, emb_size=128, img_size=32):
+    def __init__(
+        self,
+        in_channels=3,
+        patch_size=4,
+        emb_size=128,
+        img_size=32,
+        stem_channels=64
+    ):
         super().__init__()
+
         self.n_patches = (img_size // patch_size) ** 2
-        self.proj = nn.Conv2d(in_channels, emb_size,
-                              kernel_size=patch_size,
-                              stride=patch_size)
+
+        # 🔹 Convolutional stem
+        self.stem = nn.Sequential(
+            nn.Conv2d(in_channels, stem_channels, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(stem_channels),
+            nn.GELU(),
+
+            nn.Conv2d(stem_channels, stem_channels, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(stem_channels),
+            nn.GELU(),
+        )
+
+        # 🔹 Patch projection
+        self.proj = nn.Conv2d(
+            stem_channels,
+            emb_size,
+            kernel_size=patch_size,
+            stride=patch_size
+        )
 
     def forward(self, x):
-        x = self.proj(x)                  # [B, E, H', W']
-        x = x.flatten(2)                  # [B, E, N]
-        x = x.transpose(1, 2)             # [B, N, E]
+        x = self.stem(x)            # [B, C', H, W]
+        x = self.proj(x)            # [B, E, H', W']
+        x = x.flatten(2)            # [B, E, N]
+        x = x.transpose(1, 2)       # [B, N, E]
         return x
 
 
