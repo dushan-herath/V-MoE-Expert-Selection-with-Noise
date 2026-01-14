@@ -41,7 +41,8 @@ class CIFAR10Small:
 
         test_transform = T.Compose([
             T.ToTensor(),
-            T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            #T.Lambda(lambda x: x + 0.05 * torch.randn_like(x))
         ])
 
         full_train = torchvision.datasets.CIFAR10(
