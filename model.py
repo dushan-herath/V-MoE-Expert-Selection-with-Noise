@@ -70,8 +70,8 @@ class MoE(nn.Module):
         logits = self.router(x)                    # [B, N, num_experts]
         _, topk_idx = torch.topk(logits, self.k, dim=-1)  # [B, N, k]
 
-        flat_x = x.view(T, E)                      # [T, E]
-        flat_topk = topk_idx.view(T, self.k)       # [T, k]
+        flat_x = x.reshape(T, E)                      # [T, E]
+        flat_topk = topk_idx.reshape(T, self.k)       # [T, k]
 
         # Output buffer
         out = torch.zeros_like(flat_x)             # [T, E]
