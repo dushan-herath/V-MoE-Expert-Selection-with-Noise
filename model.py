@@ -120,7 +120,7 @@ class ViTMoE(nn.Module):
         mlp_ratio=4.0,
         dropout=0.1,
         moe_layers=None,
-        k=1
+        k=3
     ):
         super().__init__()
 
