@@ -23,8 +23,8 @@ if __name__ == "__main__":  # necessary for Windows
         "dropout": 0.3,
         "num_classes": 10,
         "batch_size": 32,
-        "train_size": 20000,
-        "test_size": 5000,
+        "train_size": 40000,
+        "test_size": 10000,
         "epochs": 100,
         "lr": 1e-3,
         "seed": 42
