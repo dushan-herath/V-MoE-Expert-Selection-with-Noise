@@ -35,7 +35,8 @@ class CIFAR10Small:
             #T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
             T.RandomRotation(15),
             T.ToTensor(),
-            T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            T.Lambda(lambda x: x + 0.05 * torch.randn_like(x))
         ])
 
         test_transform = T.Compose([
