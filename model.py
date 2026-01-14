@@ -60,44 +60,57 @@ class MoE(nn.Module):
     def forward(self, x, return_routing=False):
         """
         x: [B, N, E]
-        return_routing: if True, returns top-k expert indices for analysis
         """
         B, N, E = x.shape
-        T = B * N  # total tokens
+        T = B * N
 
-        # 1. Top-K routing (hard, sparse)
-        logits = self.router(x)                     # [B, N, num_experts]
-        _, topk_idx = torch.topk(logits, self.k, dim=-1)  # [B, N, k]
+        # ------------------------------------------------
+        # 1. Soft routing
+        # ------------------------------------------------
+        logits = self.router(x)              # [B, N, num_experts]
 
-        flat_x = x.reshape(T, E)                      # [T, E]
-        flat_topk = topk_idx.reshape(T, self.k)       # [T, k]
+        if self.training:
+            logits = logits + 0.1 * torch.randn_like(logits)  # routing noise
+
+        probs = F.softmax(logits, dim=-1)    # [B, N, num_experts]
+
+        # ------------------------------------------------
+        # 2. Top-K selection (from probs, NOT logits)
+        # ------------------------------------------------
+        topk_probs, topk_idx = torch.topk(probs, self.k, dim=-1)  # [B,N,k]
+
+        flat_x = x.reshape(T, E)
+        flat_idx = topk_idx.reshape(T, self.k)
+        flat_w = topk_probs.reshape(T, self.k)
 
         # Output buffer
-        out = torch.zeros_like(flat_x)             # [T, E]
+        out = torch.zeros_like(flat_x)
 
-        # 2. Selective expert execution
+        # ------------------------------------------------
+        # 3. Sparse expert execution (weighted)
+        # ------------------------------------------------
         for expert_id, expert in enumerate(self.experts):
-            mask = (flat_topk == expert_id)         # [T, k]
-            token_mask = mask.any(dim=1)            # [T]
+            mask = (flat_idx == expert_id)        # [T, k]
+            token_mask = mask.any(dim=1)          # [T]
 
             if not token_mask.any():
                 continue
 
-            tokens = flat_x[token_mask]             # [M, E]
-            expert_out = expert(tokens)             # [M, E]
+            tokens = flat_x[token_mask]           # [M, E]
+            expert_out = expert(tokens)            # [M, E]
 
-            # Count how many times token was routed here
-            counts = mask[token_mask].sum(dim=1, keepdim=True)  # [M, 1]
-            out[token_mask] += expert_out * counts
+            # routing weights for this expert
+            weights = flat_w[token_mask][mask[token_mask]]  # [M]
 
-        # 3. Average over top-K experts
-        out = out / self.k
+            out[token_mask] += expert_out * weights.unsqueeze(1)
+
         out = out.view(B, N, E)
 
         if return_routing:
-            return out, topk_idx  # <-- new minimal change
+            return out, topk_idx
 
         return out
+
 
 
 # ----------------------------------------------------
