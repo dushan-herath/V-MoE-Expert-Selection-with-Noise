@@ -2,12 +2,42 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from model import ViTMoE
+from model import ViTMoE  # make sure this is updated per below
 from dataset import CIFAR10Small
 import matplotlib.pyplot as plt
 import time
 from tqdm import tqdm  # progress bar
 
+# -----------------------------
+# Helper: check expert usage
+# -----------------------------
+def check_expert_bias(model, dataloader, device, max_batches=10):
+    """
+    Checks how often each expert is selected.
+    Uses only a few batches to avoid slowing training.
+    """
+    model.eval()
+    num_experts = model.moe.num_experts
+    expert_counts = torch.zeros(num_experts, device=device)
+
+    with torch.no_grad():
+        for i, (images, _) in enumerate(dataloader):
+            if i >= max_batches:
+                break
+
+            images = images.to(device)
+            _, routing = model(images, return_routing=True)  # [B, N, k]
+
+            for e in range(num_experts):
+                expert_counts[e] += (routing == e).sum()
+
+    probs = expert_counts / expert_counts.sum()
+    return probs.cpu()
+
+
+# -----------------------------
+# Main training script
+# -----------------------------
 if __name__ == "__main__":  # necessary for Windows
 
     # -----------------------------
@@ -33,7 +63,10 @@ if __name__ == "__main__":  # necessary for Windows
     torch.manual_seed(config["seed"])
 
     print("Loading CIFAR-10 small dataset...")
-    dataset = CIFAR10Small(train_size=config["train_size"], test_size=config["test_size"], batch_size=config["batch_size"], seed=config["seed"])
+    dataset = CIFAR10Small(train_size=config["train_size"],
+                            test_size=config["test_size"],
+                            batch_size=config["batch_size"],
+                            seed=config["seed"])
     trainloader, testloader = dataset.loaders()
     print(f"Train batches: {len(trainloader)}, Test batches: {len(testloader)}")
 
@@ -85,7 +118,6 @@ if __name__ == "__main__":  # necessary for Windows
         running_total = 0
         start_time = time.time()
 
-        # Progress bar for batches
         loop = tqdm(trainloader, desc=f"Epoch {epoch}/{config['epochs']} [Train]", leave=False)
         for images, labels in loop:
             images, labels = images.to(device), labels.to(device)
@@ -97,7 +129,6 @@ if __name__ == "__main__":  # necessary for Windows
 
             running_loss += loss.item() * images.size(0)
 
-            # Compute training accuracy
             _, preds = torch.max(outputs, 1)
             running_correct += (preds == labels).sum().item()
             running_total += labels.size(0)
@@ -134,11 +165,18 @@ if __name__ == "__main__":  # necessary for Windows
         scheduler.step()
         epoch_time = time.time() - start_time
 
+        # -----------------------------
+        # Expert usage / bias check
+        # -----------------------------
+        expert_probs = check_expert_bias(model, trainloader, device)
+        expert_str = " | ".join([f"E{i}: {p:.2f}" for i, p in enumerate(expert_probs)])
+
         print(f"Epoch [{epoch}/{config['epochs']}] "
               f"Train Loss: {train_loss:.4f} "
               f"Train Acc: {train_acc*100:.2f}% "
               f"Val Loss: {val_loss:.4f} "
               f"Val Acc: {val_acc*100:.2f}% "
+              f"Experts → {expert_str} "
               f"Time: {epoch_time:.1f}s")
 
     # -----------------------------

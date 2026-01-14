@@ -41,7 +41,7 @@ class Expert(nn.Module):
 
 
 # ----------------------------------------------------
-# Vectorized Top-K MoE
+# Vectorized Top-K MoE (with optional routing output)
 # ----------------------------------------------------
 class MoE(nn.Module):
     def __init__(self, emb_size, num_experts=4, hidden_size=None, k=1, dropout=0.1):
@@ -57,17 +57,16 @@ class MoE(nn.Module):
 
         self.router = nn.Linear(emb_size, num_experts)
 
-    def forward(self, x):
+    def forward(self, x, return_routing=False):
         """
         x: [B, N, E]
+        return_routing: if True, returns top-k expert indices for analysis
         """
         B, N, E = x.shape
         T = B * N  # total tokens
 
-        # -------------------------------
         # 1. Top-K routing (hard, sparse)
-        # -------------------------------
-        logits = self.router(x)                    # [B, N, num_experts]
+        logits = self.router(x)                     # [B, N, num_experts]
         _, topk_idx = torch.topk(logits, self.k, dim=-1)  # [B, N, k]
 
         flat_x = x.reshape(T, E)                      # [T, E]
@@ -76,11 +75,8 @@ class MoE(nn.Module):
         # Output buffer
         out = torch.zeros_like(flat_x)             # [T, E]
 
-        # -------------------------------
         # 2. Selective expert execution
-        # -------------------------------
         for expert_id, expert in enumerate(self.experts):
-            # mask: tokens routed to this expert
             mask = (flat_topk == expert_id)         # [T, k]
             token_mask = mask.any(dim=1)            # [T]
 
@@ -92,16 +88,16 @@ class MoE(nn.Module):
 
             # Count how many times token was routed here
             counts = mask[token_mask].sum(dim=1, keepdim=True)  # [M, 1]
-
             out[token_mask] += expert_out * counts
 
-        # -------------------------------
         # 3. Average over top-K experts
-        # -------------------------------
-        out = out / self.k                          # simple mean
+        out = out / self.k
+        out = out.view(B, N, E)
 
-        return out.view(B, N, E)
+        if return_routing:
+            return out, topk_idx  # <-- new minimal change
 
+        return out
 
 
 # ----------------------------------------------------
@@ -169,20 +165,25 @@ class ViTMoE(nn.Module):
 
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
-    def forward(self, x):
+    def forward(self, x, return_routing=False):
         x = self.patch_embed(x)      # [B, N, E]
         x = x + self.pos_embed
         x = self.dropout(x)
 
         x = self.attn_block(x)
-        x = self.moe(x)
+
+        if return_routing:
+            x, routing = self.moe(x, return_routing=True)
+        else:
+            x = self.moe(x)
 
         x = self.norm(x)
-
-        # Global average pooling
         x = x.mean(dim=1)
+        logits = self.head(x)
 
-        return self.head(x)
+        if return_routing:
+            return logits, routing  # <-- minimal change
+        return logits
 
 
 # ----------------------------------------------------
@@ -193,6 +194,6 @@ if __name__ == "__main__":
     model = ViTMoE(k=2).to(device)
 
     x = torch.randn(8, 3, 32, 32).to(device)
-    y = model(x)
-
-    print("Output shape:", y.shape)
+    y = model(x, return_routing=True)
+    print("Output shape:", y[0].shape)  # logits
+    print("Routing shape:", y[1].shape) # top-k experts
