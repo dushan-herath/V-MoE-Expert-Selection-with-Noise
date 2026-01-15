@@ -6,14 +6,11 @@ import numpy as np
 
 
 class CIFAR10Small:
-    """
-    CIFAR-10 loader for low-data Vision-MoE experiments
-    """
 
     def __init__(self,
                  data_root="./data",
                  train_size=1000,
-                 test_size=500,      # <-- make test size configurable
+                 test_size=500,      
                  batch_size=64,
                  num_workers=0,
                  seed=0):
@@ -28,7 +25,7 @@ class CIFAR10Small:
         self._build()
 
     def _build(self):
-        # Data augmentations for small data
+        # data augmentations for small data
         train_transform = T.Compose([
             #T.RandomCrop(32, padding=4),
             T.RandomHorizontalFlip(),
@@ -41,8 +38,8 @@ class CIFAR10Small:
 
         test_transform = T.Compose([
             T.ToTensor(),
-            T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            #T.Lambda(lambda x: x + 0.05 * torch.randn_like(x))
+            T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            #T.Lambda(lambda x: x + 0.10 * torch.randn_like(x))
         ])
 
         full_train = torchvision.datasets.CIFAR10(
@@ -59,14 +56,14 @@ class CIFAR10Small:
             transform=test_transform
         )
 
-        # Reproducible small subset for train
+        # reproducible small subset for train
         np.random.seed(self.seed)
         train_indices = np.random.choice(len(full_train),
                                          self.train_size,
                                          replace=False)
         self.train_set = Subset(full_train, train_indices)
 
-        # Reproducible small subset for test (if test_size given)
+        # reproducible small subset for test, if test_size given
         if self.test_size is not None:
             test_indices = np.random.choice(len(full_test),
                                             self.test_size,
@@ -95,13 +92,11 @@ class CIFAR10Small:
         return train_loader, test_loader
 
 
+# Just to test the dataset class
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from collections import Counter
 
-    print("Loading CIFAR-10 small dataset...")
-
-    # Example: 2000 train, 500 test samples
     data = CIFAR10Small(train_size=2000, test_size=500, batch_size=64)
     trainloader, testloader = data.loaders()
 
@@ -114,7 +109,7 @@ if __name__ == "__main__":
         labels.extend(y.tolist())
 
     counter = Counter(labels)
-    print("\nClass distribution in small training set:")
+    print("\nClass distribution in training set:")
     for k in sorted(counter.keys()):
         print(f"Class {k}: {counter[k]} samples")
 
@@ -147,6 +142,6 @@ if __name__ == "__main__":
         axes[1, i].axis("off")
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.suptitle("CIFAR-10 Small Dataset (Train vs Test)", fontsize=16)
+    plt.suptitle("Train vs Test Samples", fontsize=16)
     plt.subplots_adjust(hspace=0.2, wspace=0.3)
     plt.show()
