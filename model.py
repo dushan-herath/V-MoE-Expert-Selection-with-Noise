@@ -216,9 +216,16 @@ class ViTMoE(nn.Module):
 
         # MoE layer
         if return_routing or return_load_loss:
-            x, routing, load_loss = self.moe(x, return_routing=True, return_load_loss=return_load_loss)
+            moe_out = self.moe(x, return_routing=True, return_load_loss=return_load_loss)
+
+            # unpack according to what is returned by MoE
+            if return_load_loss:
+                x, routing, load_loss = moe_out
+            else:
+                x, routing = moe_out
         else:
             x = self.moe(x)
+
 
         # normalization and pooling
         x = self.norm(x)
