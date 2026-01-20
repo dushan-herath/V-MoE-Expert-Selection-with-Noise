@@ -143,7 +143,7 @@ if __name__ == "__main__":
             #outputs = model(images)
             #loss = criterion(outputs, labels)
             outputs, _, load_loss = model(images, return_routing=True, return_load_loss=True)
-            loss = criterion(outputs, labels) + 0.01 * load_loss  # small weight for balancing
+            loss = criterion(outputs, labels) + 0.05 * load_loss  # small weight for balancing
             
             loss.backward()
             optimizer.step()
