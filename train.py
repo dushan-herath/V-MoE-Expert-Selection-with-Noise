@@ -140,8 +140,11 @@ if __name__ == "__main__":
         for images, labels in loop:
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
-            outputs = model(images)
-            loss = criterion(outputs, labels)
+            #outputs = model(images)
+            #loss = criterion(outputs, labels)
+            outputs, _, load_loss = model(images, return_routing=True, return_load_loss=True)
+            loss = criterion(outputs, labels) + 0.01 * load_loss  # small weight for balancing
+            
             loss.backward()
             optimizer.step()
 

@@ -47,15 +47,13 @@ class PatchEmbedding(nn.Module):
         return x
 
 
-
-
 # Expert feed forward network
 class Expert(nn.Module):
     def __init__(self, emb_size, hidden_size, dropout):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(emb_size, hidden_size), # sequential layers
-            nn.GELU(), 
+            nn.GELU(),
             nn.Linear(hidden_size, emb_size), # converting back to emb_size
             nn.Dropout(dropout)
         )
@@ -65,63 +63,74 @@ class Expert(nn.Module):
 
 
 # top k routing MoE layer
-# First this layer routes tokens to experts based on top k probabilities
-#   then it executes only those experts for the selected tokens
-#   and combines the outputs weighted by the routing probabilities
-
+# This layer routes tokens to top-k experts based on router probabilities
+# then executes only selected experts and combines outputs weighted by routing probs
 class MoE(nn.Module):
     def __init__(self, emb_size, num_experts=4, hidden_size=None, k=1, dropout=0.1):
         super().__init__()
         self.k = k # select top k experts for each token
         self.num_experts = num_experts # total number of experts
-        hidden_size = hidden_size or int(emb_size * 1.5) 
+        hidden_size = hidden_size or int(emb_size * 1.5)
 
-        self.experts = nn.ModuleList([  
-            Expert(emb_size, hidden_size, dropout)  # creating list of experts
+        # list of expert networks
+        self.experts = nn.ModuleList([
+            Expert(emb_size, hidden_size, dropout)
             for _ in range(num_experts)
         ])
 
-        self.router = nn.Linear(emb_size, num_experts) # routing network outputting logits for each expert per token
+        # routing network outputting logits for each expert per token
+        self.router = nn.Linear(emb_size, num_experts)
 
-    def forward(self, x, return_routing=False):
+    def forward(self, x, return_routing=False, return_load_loss=False):
+        B, N, E = x.shape
+        T = B * N
 
-        B, N, E = x.shape # batch size, number of tokens, embedding size
-        
-        T = B * N # get total tokens in the batch
+        # routing logits for each token
+        logits = self.router(x)
+        probs = F.softmax(logits, dim=-1)    # convert logits to probabilities [B,N,num_experts]
 
-        logits = self.router(x)      # get routing logits for each token  [B, N, num_experts]
+        # top-k selection from probabilities
+        topk_probs, topk_idx = torch.topk(probs, self.k, dim=-1)  # [B,N,k]
 
-        if self.training: # added this to reduce expert collapse during training
-            logits = logits + 0.1 * torch.randn_like(logits)  
+        # flatten tokens for processing
+        flat_x = x.reshape(T, E)        # [T, E]
+        flat_idx = topk_idx.reshape(T, self.k)  # [T, k]
+        flat_w = topk_probs.reshape(T, self.k)  # [T, k]
 
-        probs = F.softmax(logits, dim=-1)    # convert logits to probabilities [B, N, num_experts]
+        # initialize output
+        out = torch.zeros_like(flat_x)
 
-        # top k selection from probabilities
-        topk_probs, topk_idx = torch.topk(probs, self.k, dim=-1)  # output is [B,N,k] for both probs and indices
-
-        flat_x = x.reshape(T, E) # flat all tokens in the batch to [T, E]
-        flat_idx = topk_idx.reshape(T, self.k) # flat all top k expert indices in the batch to [T, k]
-        flat_w = topk_probs.reshape(T, self.k) # flat all top k expert weights in the batch to [T, k]
-
-        out = torch.zeros_like(flat_x) # create a tensor to hold the output [T, E]
-
-        # find for each expert, what tokens are assigned to it and process them and put them back
+        # process each expert separately
         for expert_id, expert in enumerate(self.experts):
-            mask = (flat_idx == expert_id)        # [T, k] create mask for tokens assigned to this expert like [[F,F],[T,F] ......
-            token_mask = mask.any(dim=1)   # [T] , if any row of the k selections is this expert, mark True, else False like [F,T,F,T,.......
-
-            if not token_mask.any():    # if no tokens for this expert continue
+            mask = (flat_idx == expert_id)           # [T, k], tokens assigned to this expert
+            token_mask = mask.any(dim=1)             # [T], True if token assigned to expert
+            if not token_mask.any():
                 continue
 
-            tokens = flat_x[token_mask]  # outputs [M, E] select tokens for this expert, M if True count in token_mask
-            expert_out = expert(tokens)  # outputs [M, E] process tokens through each expert to get expert outputs which are emb_size
+            tokens = flat_x[token_mask]              # select tokens for this expert
+            expert_out = expert(tokens)              # process tokens through expert
 
             # routing weights for this expert
-            weights = flat_w[token_mask][mask[token_mask]]  # output size is  [M], select the corresponding weights for the selected tokens
+            weights = flat_w[token_mask][mask[token_mask]]  # [M], top-k weights for expert
+            out[token_mask] += expert_out * weights.unsqueeze(1)  # weighted sum
 
-            out[token_mask] += expert_out * weights.unsqueeze(1)  # weight the expert outputs by the routing weights and update the output
+        # reshape back to [B, N, E]
+        out = out.view(B, N, E)
 
-        out = out.view(B, N, E) # reshape total tokens output back to [B, N, E]
+        # compute load balancing loss if requested
+        if return_load_loss:
+            # Importance: sum of probabilities per expert
+            importance = probs.sum(dim=(0,1))  # [num_experts]
+            importance = importance / importance.sum()
+
+            # Load: count of tokens assigned to each expert in top-k
+            expert_range = torch.arange(self.num_experts, device=x.device)  # [num_experts]
+            load_mask = (flat_idx[:, None, :] == expert_range[None,:,None])  # [T,num_experts,k]
+            load = load_mask.any(dim=2).sum(dim=0)                             # [num_experts]
+            load = load / load.sum()
+
+            load_loss = (importance * load * self.num_experts).sum()  # encourages balanced usage
+            return out, topk_idx, load_loss
 
         if return_routing:
             return out, topk_idx
@@ -133,21 +142,22 @@ class MoE(nn.Module):
 class SelfAttentionBlock(nn.Module):
     def __init__(self, emb_size, num_heads, dropout):
         super().__init__()
-        self.norm = nn.LayerNorm(emb_size) 
+        self.norm = nn.LayerNorm(emb_size)
         self.attn = nn.MultiheadAttention(
-            emb_size, num_heads, batch_first=True  
+            emb_size, num_heads, batch_first=True
         )
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        attn_out, _ = self.attn( # query, key, value all are x after normalization
-            self.norm(x), 
-            self.norm(x),
-            self.norm(x)
+        attn_out, _ = self.attn(
+            self.norm(x),  # query
+            self.norm(x),  # key
+            self.norm(x)   # value
         )
-        return x + self.dropout(attn_out) # residual connection
+        return x + self.dropout(attn_out)  # residual connection
 
 
+# ViT-MoE model
 class ViTMoE(nn.Module):
     def __init__(
         self,
@@ -163,55 +173,67 @@ class ViTMoE(nn.Module):
     ):
         super().__init__()
 
+        # patch embedding layer
         self.patch_embed = PatchEmbedding(
-            in_channels, patch_size, emb_size, img_size  # patch embedding layer
+            in_channels, patch_size, emb_size, img_size
         )
 
+        # positional embeddings
         self.pos_embed = nn.Parameter(
-            torch.zeros(1, self.patch_embed.n_patches, emb_size) # positional embeddings layer with shape [1, N, E]
+            torch.zeros(1, self.patch_embed.n_patches, emb_size)
         )
         self.dropout = nn.Dropout(dropout)
 
+        # attention block
         self.attn_block = SelfAttentionBlock(
-            emb_size, num_heads, dropout # attention block
+            emb_size, num_heads, dropout
         )
 
+        # MoE layer
         self.moe = MoE(
             emb_size=emb_size,
             num_experts=6,
-            hidden_size=int(emb_size * mlp_ratio), # moe layer
+            hidden_size=int(emb_size * mlp_ratio),
             dropout=dropout,
             k=k
         )
 
-        self.norm = nn.LayerNorm(emb_size) # normalization layer
-        self.head = nn.Linear(emb_size, num_classes) # classification head
+        # normalization and classification head
+        self.norm = nn.LayerNorm(emb_size)
+        self.head = nn.Linear(emb_size, num_classes)
 
-        nn.init.trunc_normal_(self.pos_embed, std=0.02) # initial positional embeddings
+        # initialize positional embeddings
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
-    def forward(self, x, return_routing=False):
-        x = self.patch_embed(x)       # generate patch embeddings
-        x = x + self.pos_embed  # add positional embeddings
-        x = self.dropout(x)      # apply dropout
+    def forward(self, x, return_routing=False, return_load_loss=False):
+        # patch embedding
+        x = self.patch_embed(x)
+        x = x + self.pos_embed
+        x = self.dropout(x)
 
-        x = self.attn_block(x)    # apply attention block
+        # attention block
+        x = self.attn_block(x)
 
-        if return_routing:  # if routing info is requested
-            x, routing = self.moe(x, return_routing=True)
+        # MoE layer
+        if return_routing or return_load_loss:
+            x, routing, load_loss = self.moe(x, return_routing=True, return_load_loss=return_load_loss)
         else:
-            x = self.moe(x)     # apply MoE layer output still [B, N, E]
+            x = self.moe(x)
 
-        x = self.norm(x)      # normalize output 
-        x = x.mean(dim=1)   # global average pooling over tokens -> [B, E]
-        logits = self.head(x)   # classification head -> [B, num_classes]
+        # normalization and pooling
+        x = self.norm(x)
+        x = x.mean(dim=1)
+        logits = self.head(x)
 
+        # return outputs according to flags
+        if return_load_loss:
+            return logits, routing, load_loss
         if return_routing:
-            return logits, routing # return logits and routing info
+            return logits, routing
         return logits
 
 
 # test the model
-
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = ViTMoE(k=2).to(device)
