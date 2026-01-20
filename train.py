@@ -68,13 +68,13 @@ if __name__ == "__main__":
         "patch_size": 4,
         "emb_size": 128,
         "num_heads": 8,
-        "dropout": 0.3,
+        "dropout": 0.2,
         "num_classes": 10,
         "batch_size": 32,
         "train_size": 50000,
         "test_size": 10000,
         "epochs": 100,
-        "lr": 1e-3,
+        "lr": 3e-4,
         "seed": 42
     }
 

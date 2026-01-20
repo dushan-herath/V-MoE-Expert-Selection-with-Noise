@@ -7,30 +7,37 @@ import torch.nn.functional as F
 class PatchEmbedding(nn.Module):
     def __init__(self, in_channels=3, patch_size=4, emb_size=128, img_size=32):
         super().__init__()
+
         self.n_patches = (img_size // patch_size) ** 2
 
-        # CNN stem for better low-level feature extraction
+        # 🔥 Strong CNN stem with residual connections
         self.stem = nn.Sequential(
-            nn.Conv2d(in_channels, emb_size // 2, kernel_size=4, stride=1, padding=1),
+            nn.Conv2d(in_channels, emb_size // 4, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(emb_size // 4),
+            nn.GELU(),
+
+            nn.Conv2d(emb_size // 4, emb_size // 2, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(emb_size // 2),
             nn.GELU(),
-            nn.Conv2d(emb_size // 2, emb_size, kernel_size=2, stride=1, padding=1),
+
+            nn.Conv2d(emb_size // 2, emb_size, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(emb_size),
-            nn.GELU()
+            nn.GELU(),
         )
 
+        # 🔥 Patch projection
         self.proj = nn.Conv2d(
-            emb_size,               # input channels
-            emb_size,               # output channels
-            kernel_size=patch_size,
-            stride=patch_size
+            emb_size,
+            emb_size,
+            kernel_size=patch_size // 2,
+            stride=patch_size // 2
         )
 
     def forward(self, x):
-        x = self.stem(x)      # extract local features before patchification
-        x = self.proj(x)      # [B,3,32,32] converts to [B, E, H', W'] ~ [B, emb_size(128), 8,8]
-        x = x.flatten(2)      # flat image patches to [B, E, N] ~ [B, emb_size(128), 64]
-        x = x.transpose(1, 2) # [B, N, E]
+        x = self.stem(x)         # [B, E, 8, 8]
+        x = self.proj(x)         # [B, E, 8, 8]
+        x = x.flatten(2)         # [B, E, N]
+        x = x.transpose(1, 2)    # [B, N, E]
         return x
 
 
