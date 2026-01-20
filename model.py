@@ -11,10 +11,10 @@ class PatchEmbedding(nn.Module):
 
         # CNN stem for better low-level feature extraction
         self.stem = nn.Sequential(
-            nn.Conv2d(in_channels, emb_size // 2, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(in_channels, emb_size // 2, kernel_size=4, stride=1, padding=1),
             nn.BatchNorm2d(emb_size // 2),
             nn.GELU(),
-            nn.Conv2d(emb_size // 2, emb_size, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(emb_size // 2, emb_size, kernel_size=2, stride=1, padding=1),
             nn.BatchNorm2d(emb_size),
             nn.GELU()
         )
