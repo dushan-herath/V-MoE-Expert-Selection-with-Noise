@@ -38,6 +38,7 @@ class CIFAR10Small:
 
         test_transform = T.Compose([
             T.ToTensor(),
+            #T.Lambda(lambda x: x[[2,0,1], :, :]),
             T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
             #T.Lambda(lambda x: x + 0.10 * torch.randn_like(x))
         ])
