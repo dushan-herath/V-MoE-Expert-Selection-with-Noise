@@ -11,41 +11,40 @@ class PatchEmbedding(nn.Module):
         self.emb_size = emb_size
         self.img_size = img_size
 
-        # CNN stem
+        # CNN stem for richer features (no downsampling)
         self.stem = nn.Sequential(
-            nn.Conv2d(in_channels, emb_size // 4, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(emb_size // 4),
-            nn.GELU(),
-
-            nn.Conv2d(emb_size // 4, emb_size // 2, kernel_size=3, stride=2, padding=1),  # downsample
+            nn.Conv2d(in_channels, emb_size // 2, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(emb_size // 2),
             nn.GELU(),
 
-            nn.Conv2d(emb_size // 2, emb_size, kernel_size=3, stride=2, padding=1),       # downsample
-            nn.BatchNorm2d(emb_size),
+            nn.Conv2d(emb_size // 2, emb_size // 2, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(emb_size // 2),
             nn.GELU(),
+
+            # residual-like connection
+            nn.Conv2d(emb_size // 2, emb_size, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(emb_size),
+            nn.GELU()
         )
 
-        # Patch projection
+        # Patch projection (non-overlapping patches)
         self.proj = nn.Conv2d(
             emb_size,
             emb_size,
-            kernel_size=patch_size // 2,
-            stride=patch_size // 2
+            kernel_size=patch_size,
+            stride=patch_size
         )
 
-        # compute number of patches based on img_size and strides
-        final_size = img_size // 4  # because stride=2 twice in stem
-        self.n_patches = (final_size // (patch_size // 2)) ** 2
+        # compute number of patches
+        self.n_patches = (img_size // patch_size) ** 2
 
     def forward(self, x):
-        x = self.stem(x)
-        x = self.proj(x)
+        # CNN stem extracts rich features
+        x = self.stem(x)      # [B, E, 32, 32]
+        x = self.proj(x)      # [B, E, 8, 8]
         B, E, H, W = x.shape
-        x = x.flatten(2).transpose(1, 2)
+        x = x.flatten(2).transpose(1, 2)  # [B, 64, E]
         return x
-
-
 
 
 
